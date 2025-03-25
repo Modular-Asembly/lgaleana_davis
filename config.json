@@ -1,0 +1,37 @@
+{
+  "name": "davis",
+  "user": "lgaleana",
+  "architecture": [
+    {
+      "design": {
+        "type": "infrastructure",
+        "name": "Cloud Run",
+        "details": ""
+      },
+      "files": [],
+      "update_status": "up_to_date",
+      "is_deployed": false
+    },
+    {
+      "design": {
+        "type": "module",
+        "name": "main",
+        "details": "This is a FastAPI service. Use FastAPI design patterns and best practices.\n\nPlace all files inside the app/ directory, including HTML templates.\n\napp/main.py should contain the following:\n- **Very important:** Call load_dotenv() before any other import.\n- Add CORSMiddleware with *.\n- Add all the application routers.\n- Call Base.metadata.create_all(engine).\n\nNo component can depend on this component.",
+        "env_variables": [],
+        "packages": [
+          "fastapi==0.115.6",
+          "pydantic[email]==2.10.4",
+          "python-dotenv==1.0.1",
+          "uvicorn==0.34.0"
+        ],
+        "dependencies": [
+          "Every router and Base"
+        ]
+      },
+      "files": [],
+      "update_status": "to_update",
+      "is_deployed": false
+    }
+  ],
+  "github": "https://github.com/Modular-Asembly/lgaleana_davis"
+}
