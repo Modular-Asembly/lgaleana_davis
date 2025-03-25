@@ -31,6 +31,159 @@
       "files": [],
       "update_status": "to_update",
       "is_deployed": false
+    },
+    {
+      "design": {
+        "type": "infrastructure",
+        "name": "Cloud SQL Database",
+        "details": ""
+      },
+      "files": [],
+      "update_status": "up_to_date",
+      "is_deployed": false
+    },
+    {
+      "design": {
+        "type": "module",
+        "name": "SQL adaptor",
+        "details": "Defines the classic FastAPI SQL utility.\n\nConnects to a database.\nDefines Base.\nDefines a method that returns sessions. This method is used by the FastAPI endpoints.",
+        "env_variables": [
+          "DB_URL"
+        ],
+        "packages": [
+          "psycopg2-binary==2.9.10",
+          "sqlalchemy==2.0.36"
+        ],
+        "dependencies": []
+      },
+      "files": [],
+      "update_status": "to_update",
+      "is_deployed": false
+    },
+    {
+      "design": {
+        "type": "infrastructure",
+        "name": "Cloud Scheduler Job",
+        "details": ""
+      },
+      "files": [],
+      "update_status": "up_to_date",
+      "is_deployed": false
+    },
+    {
+      "design": {
+        "type": "module",
+        "name": "pull data from shopify",
+        "details": "This endpoint defines a scheduled job that pulls data from a Shopify store on a daily basis. It authenticates using provided API credentials, retrieves the required data, and writes the results into the database by inserting records into the Shopify Data table. The endpoint handles error logging and retries, ensuring data integrity on each run.",
+        "env_variables": [
+          "SHOPIFY_API_KEY",
+          "SHOPIFY_API_PASSWORD",
+          "SHOPIFY_SHOP_NAME",
+          "DB_URL"
+        ],
+        "packages": [
+          "shopifyapi==9.7.0",
+          "requests==2.31.0"
+        ],
+        "dependencies": [
+          "SQL adaptor",
+          "Shopify Data"
+        ]
+      },
+      "files": [],
+      "update_status": "to_update",
+      "is_deployed": false
+    },
+    {
+      "design": {
+        "type": "datamodel",
+        "name": "Shopify Data",
+        "details": "This datamodel represents the data pulled from Shopify. It includes fields for id (primary key), shopify_id (the unique id from Shopify), title (name of the product or resource), price (if applicable), created_at and updated_at timestamps. It can be extended with additional fields as needed.",
+        "dependencies": [],
+        "packages": [
+          "psycopg2-binary==2.9.10",
+          "sqlalchemy==2.0.36"
+        ]
+      },
+      "files": [],
+      "update_status": "to_update",
+      "is_deployed": false
+    },
+    {
+      "design": {
+        "type": "datamodel",
+        "name": "Google Ads Data",
+        "details": "This datamodel represents the data pulled from Google Ads. It includes fields for id (primary key), google_ads_id (the unique id from Google Ads), campaign_name, impressions, clicks, cost, and timestamps for created_at and updated_at. Additional fields can be added as needed.",
+        "dependencies": [],
+        "packages": [
+          "psycopg2-binary==2.9.10",
+          "sqlalchemy==2.0.36"
+        ]
+      },
+      "files": [],
+      "update_status": "to_update",
+      "is_deployed": false
+    },
+    {
+      "design": {
+        "type": "endpoint",
+        "name": "pull data from google ads",
+        "details": "This endpoint defines a job that pulls data from Google Ads. It authenticates with Google Ads using OAuth credentials provided in environment variables, retrieves advertising data, and writes the results into the database by inserting records into the Google Ads Data table. It handles error logging and retries to ensure robustness.",
+        "env_variables": [
+          "GOOGLE_ADS_DEVELOPER_TOKEN",
+          "GOOGLE_ADS_CLIENT_ID",
+          "GOOGLE_ADS_CLIENT_SECRET",
+          "GOOGLE_ADS_REFRESH_TOKEN",
+          "DB_URL"
+        ],
+        "packages": [
+          "google-ads==18.0.0",
+          "requests==2.31.0"
+        ],
+        "dependencies": [
+          "SQL adaptor",
+          "Google Ads Data"
+        ]
+      },
+      "files": [],
+      "update_status": "to_update",
+      "is_deployed": false
+    },
+    {
+      "design": {
+        "type": "endpoint",
+        "name": "get dashboard data",
+        "details": "This endpoint aggregates data from the Shopify Data and Google Ads Data tables. It uses the SQL adaptor to query both datamodels, processes the results, and returns a JSON payload that includes key metrics and data for the dashboard. This endpoint is used by the dashboard view to render combined data from Shopify and Google Ads.",
+        "env_variables": [
+          "DB_URL"
+        ],
+        "packages": [
+          "fastapi==0.115.6",
+          "sqlalchemy==2.0.36"
+        ],
+        "dependencies": [
+          "SQL adaptor",
+          "Shopify Data",
+          "Google Ads Data"
+        ]
+      },
+      "files": [],
+      "update_status": "to_update",
+      "is_deployed": false
+    },
+    {
+      "design": {
+        "type": "view",
+        "name": "dashboard",
+        "details": "This view renders an HTML dashboard that displays aggregated data from the Shopify and Google Ads endpoints. It calls the 'get dashboard data' endpoint to fetch data, and then uses Jinja2 templates to render the dashboard layout with charts and tables for visualizing key metrics.",
+        "packages": [
+          "jinja2==3.1.2"
+        ],
+        "endpoint": "get dashboard data"
+      },
+      "files": [],
+      "update_status": "to_update",
+      "is_deployed": false
     }
   ],
   "github": "https://github.com/Modular-Asembly/lgaleana_davis"
