@@ -82,7 +82,7 @@
           "DB_URL"
         ],
         "packages": [
-          "shopifyapi==12.7.0",
+          "ShopifyAPI==12.7.0",
           "requests==2.31.0"
         ],
         "dependencies": [
