@@ -25,11 +25,20 @@
           "uvicorn==0.34.0"
         ],
         "dependencies": [
-          "Every router and Base"
+          "get dashboard data",
+          "dashboard",
+          "SQL adaptor",
+          "pull data from shopify",
+          "pull data from google ads"
         ]
       },
-      "files": [],
-      "update_status": "to_update",
+      "files": [
+        {
+          "path": "app/main.py",
+          "content": "from dotenv import load_dotenv\nload_dotenv()\n\nfrom fastapi import FastAPI\nfrom fastapi.middleware.cors import CORSMiddleware\nfrom app.db import engine, Base\n\n# Import routers from endpoints and views\nfrom app.routers.pull_shopify import router as pull_shopify_router\nfrom app.routers.pull_google_ads import router as pull_google_ads_router\nfrom app.routers.dashboard_data import router as dashboard_data_router\nfrom app.views.dashboard import router as dashboard_view_router\n\ndef create_app() -> FastAPI:\n    app = FastAPI()\n\n    # Set up CORS middleware\n    app.add_middleware(\n        CORSMiddleware,\n        allow_origins=[\"*\"],\n        allow_credentials=True,\n        allow_methods=[\"*\"],\n        allow_headers=[\"*\"],\n    )\n\n    # Create database tables\n    Base.metadata.create_all(bind=engine)\n\n    # Include routers\n    app.include_router(pull_shopify_router)\n    app.include_router(pull_google_ads_router)\n    app.include_router(dashboard_data_router)\n    app.include_router(dashboard_view_router)\n\n    return app\n\napp = create_app()\n"
+        }
+      ],
+      "update_status": "up_to_date",
       "is_deployed": false
     },
     {
@@ -56,8 +65,13 @@
         ],
         "dependencies": []
       },
-      "files": [],
-      "update_status": "to_update",
+      "files": [
+        {
+          "path": "app/db.py",
+          "content": "import os\nfrom sqlalchemy import create_engine\nfrom sqlalchemy.orm import sessionmaker, Session, declarative_base\nfrom typing import Generator\n\n# Retrieve the database URL from the environment variables. Use os.environ to ensure the type is str.\nDATABASE_URL: str = os.environ[\"DB_URL\"]\n\n# Create the SQLAlchemy engine using the provided DB_URL.\nengine = create_engine(DATABASE_URL)\n\n# Create a configured \"Session\" class.\nSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)\n\n# Base class for the ORM models.\nBase = declarative_base()\n\ndef get_db() -> Generator[Session, None, None]:\n    \"\"\"\n    Dependency that provides a SQLAlchemy database session.\n    It creates a new session for each request and ensures the session is closed after the request is finished.\n    \n    Returns:\n        A database session generator.\n    \"\"\"\n    db: Session = SessionLocal()\n    try:\n        yield db\n    finally:\n        db.close()\n"
+        }
+      ],
+      "update_status": "up_to_date",
       "is_deployed": false
     },
     {
@@ -89,8 +103,13 @@
           "Shopify Data"
         ]
       },
-      "files": [],
-      "update_status": "to_update",
+      "files": [
+        {
+          "path": "app/routers/pull_shopify.py",
+          "content": "import os\nfrom datetime import datetime\nfrom typing import Any, Dict, List\n\nimport requests\nfrom fastapi import APIRouter, Depends\nfrom sqlalchemy.orm import Session\n\nfrom app.db import get_db\nfrom app.models.shopify_data import ShopifyData\n\nrouter = APIRouter(prefix=\"/shopify\", tags=[\"Shopify\"])\n\ndef fetch_shopify_data() -> List[Dict[str, Any]]:\n    \"\"\"\n    Authenticates with Shopify using API credentials from environment variables,\n    retrieves product data and returns a list of dictionaries with the required fields.\n\n    Returns:\n        A list of dictionaries each representing a Shopify product.\n    \"\"\"\n    shopify_api_key: str = os.environ[\"SHOPIFY_API_KEY\"]\n    shopify_api_password: str = os.environ[\"SHOPIFY_API_PASSWORD\"]\n    shopify_shop_name: str = os.environ[\"SHOPIFY_SHOP_NAME\"]\n\n    # Build the Shopify URL endpoint for products\n    url: str = f\"https://{shopify_shop_name}.myshopify.com/admin/api/2023-10/products.json\"\n\n    # Make the HTTPS GET request with basic auth\n    response = requests.get(url, auth=(shopify_api_key, shopify_api_password))\n    response.raise_for_status()\n\n    products = response.json().get(\"products\", [])\n    results: List[Dict[str, Any]] = []\n    for product in products:\n        # Use product id as shopify_id, title from product title, price from first variant if exists.\n        shopify_id: str = str(product.get(\"id\"))\n        title: str = product.get(\"title\", \"\")\n        price: float = 0.0\n        variants = product.get(\"variants\", [])\n        if variants:\n            # Assume first variant price can be used; convert string to float.\n            price_str = variants[0].get(\"price\", \"0.0\")\n            try:\n                price = float(price_str)\n            except ValueError:\n                price = 0.0\n\n        entry: Dict[str, Any] = {\n            \"shopify_id\": shopify_id,\n            \"title\": title,\n            \"price\": price,\n            \"created_at\": datetime.utcnow(),\n            \"updated_at\": datetime.utcnow(),\n        }\n        results.append(entry)\n    return results\n\ndef persist_shopify_data(db: Session, data: List[Dict[str, Any]]) -> None:\n    \"\"\"\n    Inserts the list of product data dictionaries into the database.\n    For each entry, check for an existing record by shopify_id to avoid duplicates.\n\n    Args:\n        db: The database session.\n        data: A list of dictionaries each representing product data to persist.\n    \"\"\"\n    for record in data:\n        existing = db.query(ShopifyData).filter(\n            ShopifyData.shopify_id == record[\"shopify_id\"]\n        ).first()\n        if not existing:\n            new_entry = ShopifyData(\n                shopify_id=record[\"shopify_id\"],\n                title=record[\"title\"],\n                price=record[\"price\"],\n                created_at=record[\"created_at\"],\n                updated_at=record[\"updated_at\"],\n            )\n            db.add(new_entry)\n    db.commit()\n\n@router.post(\"/pull\", response_model=Dict[str, Any])\ndef pull_shopify_data(db: Session = Depends(get_db)) -> Dict[str, Any]:\n    \"\"\"\n    Pulls product data from Shopify and persists it into the database.\n    Returns a JSON payload with summary details.\n\n    Args:\n        db: Database session injected via dependency.\n\n    Returns:\n        A dictionary with the status and number of inserted records.\n    \"\"\"\n    products_data: List[Dict[str, Any]] = fetch_shopify_data()\n    persist_shopify_data(db, products_data)\n    return {\n        \"status\": \"success\",\n        \"inserted_records\": len(products_data)\n    }\n"
+        }
+      ],
+      "update_status": "up_to_date",
       "is_deployed": false
     },
     {
@@ -98,14 +117,21 @@
         "type": "datamodel",
         "name": "Shopify Data",
         "details": "This datamodel represents the data pulled from Shopify. It includes fields for id (primary key), shopify_id (the unique id from Shopify), title (name of the product or resource), price (if applicable), created_at and updated_at timestamps. It can be extended with additional fields as needed.",
-        "dependencies": [],
+        "dependencies": [
+          "SQL adaptor"
+        ],
         "packages": [
           "psycopg2-binary==2.9.10",
           "sqlalchemy==2.0.36"
         ]
       },
-      "files": [],
-      "update_status": "to_update",
+      "files": [
+        {
+          "path": "app/models/shopify_data.py",
+          "content": "from sqlalchemy import Column, Integer, String, Float, DateTime\nfrom datetime import datetime\nfrom app.db import Base\n\nclass ShopifyData(Base):\n    __tablename__ = \"shopify_data\"\n\n    id = Column(Integer, primary_key=True, index=True)\n    shopify_id = Column(String, unique=True, nullable=False, index=True)\n    title = Column(String, nullable=False)\n    price = Column(Float, nullable=True)\n    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)\n    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)\n"
+        }
+      ],
+      "update_status": "up_to_date",
       "is_deployed": false
     },
     {
@@ -113,14 +139,21 @@
         "type": "datamodel",
         "name": "Google Ads Data",
         "details": "This datamodel represents the data pulled from Google Ads. It includes fields for id (primary key), google_ads_id (the unique id from Google Ads), campaign_name, impressions, clicks, cost, and timestamps for created_at and updated_at. Additional fields can be added as needed.",
-        "dependencies": [],
+        "dependencies": [
+          "SQL adaptor"
+        ],
         "packages": [
           "psycopg2-binary==2.9.10",
           "sqlalchemy==2.0.36"
         ]
       },
-      "files": [],
-      "update_status": "to_update",
+      "files": [
+        {
+          "path": "app/models/google_ads_data.py",
+          "content": "from sqlalchemy import Column, Integer, String, Float, DateTime\nfrom datetime import datetime\nfrom app.db import Base\n\nclass GoogleAdsData(Base):\n    __tablename__ = \"google_ads_data\"\n\n    id = Column(Integer, primary_key=True, index=True)\n    google_ads_id = Column(String, unique=True, nullable=False, index=True)\n    campaign_name = Column(String, nullable=False)\n    impressions = Column(Integer, nullable=False, default=0)\n    clicks = Column(Integer, nullable=False, default=0)\n    cost = Column(Float, nullable=False, default=0.0)\n    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)\n    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)\n"
+        }
+      ],
+      "update_status": "up_to_date",
       "is_deployed": false
     },
     {
@@ -140,12 +173,17 @@
           "requests==2.31.0"
         ],
         "dependencies": [
-          "SQL adaptor",
-          "Google Ads Data"
+          "Google Ads Data",
+          "SQL adaptor"
         ]
       },
-      "files": [],
-      "update_status": "to_update",
+      "files": [
+        {
+          "path": "app/routers/pull_google_ads.py",
+          "content": "import os\nfrom datetime import datetime\nfrom typing import Dict, Any, List\n\nfrom fastapi import APIRouter, Depends\nfrom sqlalchemy.orm import Session\n\nfrom google.ads.googleads.client import GoogleAdsClient\nfrom google.ads.googleads.errors import GoogleAdsException\nimport requests\n\nfrom app.db import get_db\nfrom app.models.google_ads_data import GoogleAdsData\n\nrouter = APIRouter(prefix=\"/google-ads\", tags=[\"Google Ads\"])\n\ndef fetch_google_ads_data() -> List[Dict[str, Any]]:\n    \"\"\"\n    Authenticates with Google Ads using OAuth credentials from environment variables,\n    retrieves advertising data and returns a list of dictionaries with the required fields.\n    \"\"\"\n    # Retrieve credentials from environment variables.\n    developer_token: str = os.environ[\"GOOGLE_ADS_DEVELOPER_TOKEN\"]\n    client_id: str = os.environ[\"GOOGLE_ADS_CLIENT_ID\"]\n    client_secret: str = os.environ[\"GOOGLE_ADS_CLIENT_SECRET\"]\n    refresh_token: str = os.environ[\"GOOGLE_ADS_REFRESH_TOKEN\"]\n    # Optionally, if provided.\n    login_customer_id = os.environ.get(\"GOOGLE_ADS_LOGIN_CUSTOMER_ID\")\n\n    # Build configuration dict for GoogleAdsClient.\n    client_config: Dict[str, Any] = {\n        \"developer_token\": developer_token,\n        \"client_id\": client_id,\n        \"client_secret\": client_secret,\n        \"refresh_token\": refresh_token,\n    }\n    if login_customer_id:\n        client_config[\"login_customer_id\"] = login_customer_id\n\n    # Initialize the Google Ads client.\n    google_ads_client: GoogleAdsClient = GoogleAdsClient.load_from_dict(client_config)\n    ga_service = google_ads_client.get_service(\"GoogleAdsService\")\n\n    # Define a GAQL query to retrieve campaign metrics.\n    query: str = (\"\"\"\n        SELECT\n          campaign.id,\n          campaign.name,\n          metrics.impressions,\n          metrics.clicks,\n          metrics.cost_micros\n        FROM campaign\n        WHERE segments.date DURING TODAY\n    \"\"\")\n\n    # Replace with your Google Ads customer ID.\n    customer_id: str = os.environ[\"GOOGLE_ADS_CLIENT_ID\"]\n\n    # Execute the query.\n    response = ga_service.search(customer_id=customer_id, query=query)\n    \n    # Process the result set.\n    results: List[Dict[str, Any]] = []\n    for row in response:\n        # Convert cost from micros to standard currency unit.\n        cost: float = row.metrics.cost_micros / 1_000_000.0\n        entry: Dict[str, Any] = {\n            \"google_ads_id\": str(row.campaign.id),\n            \"campaign_name\": row.campaign.name,\n            \"impressions\": row.metrics.impressions,\n            \"clicks\": row.metrics.clicks,\n            \"cost\": cost,\n            \"created_at\": datetime.utcnow(),\n            \"updated_at\": datetime.utcnow(),\n        }\n        results.append(entry)\n    return results\n\ndef persist_google_ads_data(db: Session, data: List[Dict[str, Any]]) -> None:\n    \"\"\"\n    Inserts the list of advertising data dictionaries into the database.\n    \"\"\"\n    for record in data:\n        # Check for existing record by google_ads_id to avoid duplicates.\n        existing = db.query(GoogleAdsData).filter(\n            GoogleAdsData.google_ads_id == record[\"google_ads_id\"]\n        ).first()\n        if not existing:\n            new_entry = GoogleAdsData(\n                google_ads_id=record[\"google_ads_id\"],\n                campaign_name=record[\"campaign_name\"],\n                impressions=record[\"impressions\"],\n                clicks=record[\"clicks\"],\n                cost=record[\"cost\"],\n                created_at=record[\"created_at\"],\n                updated_at=record[\"updated_at\"],\n            )\n            db.add(new_entry)\n    db.commit()\n\n@router.post(\"/pull\", response_model=Dict[str, Any])\ndef pull_google_ads_data(db: Session = Depends(get_db)) -> Dict[str, Any]:\n    \"\"\"\n    Pulls data from Google Ads and persists it into the database.\n    Returns a JSON payload with summary data.\n    \"\"\"\n    # Fetch advertising data from Google Ads.\n    ads_data: List[Dict[str, Any]] = fetch_google_ads_data()\n\n    # Persist the fetched data into the database.\n    persist_google_ads_data(db, ads_data)\n\n    return {\n        \"status\": \"success\",\n        \"inserted_records\": len(ads_data)\n    }\n"
+        }
+      ],
+      "update_status": "up_to_date",
       "is_deployed": false
     },
     {
@@ -161,13 +199,18 @@
           "sqlalchemy==2.0.36"
         ],
         "dependencies": [
+          "Google Ads Data",
           "SQL adaptor",
-          "Shopify Data",
-          "Google Ads Data"
+          "Shopify Data"
         ]
       },
-      "files": [],
-      "update_status": "to_update",
+      "files": [
+        {
+          "path": "app/routers/dashboard_data.py",
+          "content": "from typing import Any, Dict, List\n\nfrom fastapi import APIRouter, Depends\nfrom sqlalchemy.orm import Session\n\nfrom app.db import get_db\nfrom app.models.shopify_data import ShopifyData\nfrom app.models.google_ads_data import GoogleAdsData\n\nrouter = APIRouter(prefix=\"/dashboard-data\", tags=[\"Dashboard Data\"])\n\ndef serialize_shopify_data(item: ShopifyData) -> Dict[str, Any]:\n    return {\n        \"id\": item.id,\n        \"shopify_id\": item.shopify_id,\n        \"title\": item.title,\n        \"price\": item.price,\n        \"created_at\": item.created_at.isoformat(),\n        \"updated_at\": item.updated_at.isoformat()\n    }\n\ndef serialize_google_ads_data(item: GoogleAdsData) -> Dict[str, Any]:\n    return {\n        \"id\": item.id,\n        \"google_ads_id\": item.google_ads_id,\n        \"campaign_name\": item.campaign_name,\n        \"impressions\": item.impressions,\n        \"clicks\": item.clicks,\n        \"cost\": item.cost,\n        \"created_at\": item.created_at.isoformat(),\n        \"updated_at\": item.updated_at.isoformat()\n    }\n\n@router.get(\"/\", response_model=Dict[str, Any])\ndef get_dashboard_data(db: Session = Depends(get_db)) -> Dict[str, Any]:\n    \"\"\"\n    Aggregates data from ShopifyData and GoogleAdsData tables.\n    Returns a JSON payload that includes key metrics and data for the dashboard.\n    \"\"\"\n    # Retrieve all Shopify data records.\n    shopify_records: List[ShopifyData] = db.query(ShopifyData).all()\n    shopify_data: List[Dict[str, Any]] = [serialize_shopify_data(item) for item in shopify_records]\n\n    # Retrieve all Google Ads data records.\n    google_ads_records: List[GoogleAdsData] = db.query(GoogleAdsData).all()\n    google_ads_data: List[Dict[str, Any]] = [serialize_google_ads_data(item) for item in google_ads_records]\n\n    # Compute key metrics: counts for demonstration.\n    dashboard_metrics: Dict[str, Any] = {\n        \"shopify_total\": len(shopify_data),\n        \"google_ads_total\": len(google_ads_data)\n    }\n\n    return {\n        \"metrics\": dashboard_metrics,\n        \"shopify_data\": shopify_data,\n        \"google_ads_data\": google_ads_data\n    }\n"
+        }
+      ],
+      "update_status": "up_to_date",
       "is_deployed": false
     },
     {
@@ -180,8 +223,17 @@
         ],
         "endpoint": "get dashboard data"
       },
-      "files": [],
-      "update_status": "to_update",
+      "files": [
+        {
+          "path": "app/templates/dashboard.html",
+          "content": "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n    <meta charset=\"UTF-8\">\n    <title>Dashboard</title>\n    <style>\n        body {\n            font-family: Arial, sans-serif;\n            margin: 2rem;\n        }\n        header {\n            text-align: center;\n            margin-bottom: 2rem;\n        }\n        section.metrics {\n            display: flex;\n            justify-content: space-around;\n            margin-bottom: 2rem;\n        }\n        .metric-card {\n            background-color: #f9f9f9;\n            padding: 1rem;\n            border-radius: 8px;\n            width: 40%;\n            box-shadow: 0 0 5px rgba(0,0,0,0.1);\n        }\n        table {\n            width: 100%;\n            border-collapse: collapse;\n            margin-bottom: 2rem;\n        }\n        table th, table td {\n            border: 1px solid #ddd;\n            padding: 0.75rem;\n            text-align: left;\n        }\n        table th {\n            background-color: #efefef;\n        }\n    </style>\n</head>\n<body>\n    <header>\n        <h1>Dashboard</h1>\n    </header>\n    <section class=\"metrics\">\n        <div class=\"metric-card\">\n            <h2>Shopify Total</h2>\n            <p>{{ metrics.shopify_total }}</p>\n        </div>\n        <div class=\"metric-card\">\n            <h2>Google Ads Total</h2>\n            <p>{{ metrics.google_ads_total }}</p>\n        </div>\n    </section>\n    <section class=\"data-tables\">\n        <h2>Shopify Data</h2>\n        <table>\n            <thead>\n                <tr>\n                    <th>ID</th>\n                    <th>Shopify ID</th>\n                    <th>Title</th>\n                    <th>Price</th>\n                    <th>Created At</th>\n                    <th>Updated At</th>\n                </tr>\n            </thead>\n            <tbody>\n                {% for item in shopify_data %}\n                <tr>\n                    <td>{{ item.id }}</td>\n                    <td>{{ item.shopify_id }}</td>\n                    <td>{{ item.title }}</td>\n                    <td>{{ item.price }}</td>\n                    <td>{{ item.created_at }}</td>\n                    <td>{{ item.updated_at }}</td>\n                </tr>\n                {% endfor %}\n            </tbody>\n        </table>\n\n        <h2>Google Ads Data</h2>\n        <table>\n            <thead>\n                <tr>\n                    <th>ID</th>\n                    <th>Google Ads ID</th>\n                    <th>Campaign Name</th>\n                    <th>Impressions</th>\n                    <th>Clicks</th>\n                    <th>Cost</th>\n                    <th>Created At</th>\n                    <th>Updated At</th>\n                </tr>\n            </thead>\n            <tbody>\n                {% for item in google_ads_data %}\n                <tr>\n                    <td>{{ item.id }}</td>\n                    <td>{{ item.google_ads_id }}</td>\n                    <td>{{ item.campaign_name }}</td>\n                    <td>{{ item.impressions }}</td>\n                    <td>{{ item.clicks }}</td>\n                    <td>{{ item.cost }}</td>\n                    <td>{{ item.created_at }}</td>\n                    <td>{{ item.updated_at }}</td>\n                </tr>\n                {% endfor %}\n            </tbody>\n        </table>\n    </section>\n</body>\n</html>\n"
+        },
+        {
+          "path": "app/views/dashboard.py",
+          "content": "from fastapi import APIRouter, Depends, Request\nfrom fastapi.responses import HTMLResponse\nfrom fastapi.templating import Jinja2Templates\nfrom sqlalchemy.orm import Session\n\nfrom app.db import get_db\nfrom app.routers.dashboard_data import get_dashboard_data\n\nrouter = APIRouter()\ntemplates = Jinja2Templates(directory=\"app/templates\")\n\n@router.get(\"/dashboard\", response_class=HTMLResponse)\ndef dashboard(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:\n    \"\"\"\n    Renders the HTML dashboard view by calling the \n    'get dashboard data' endpoint to fetch aggregated dashboard data.\n    \"\"\"\n    # Call the get_dashboard_data function to retrieve dashboard metrics and data.\n    # The function signature returns a dictionary with keys: metrics, shopify_data, google_ads_data.\n    data = get_dashboard_data(db)\n    \n    # Combine data with the request for rendering the Jinja2 template.\n    context = {\"request\": request}\n    context.update(data)\n    return templates.TemplateResponse(\"dashboard.html\", context)\n"
+        }
+      ],
+      "update_status": "up_to_date",
       "is_deployed": false
     }
   ],

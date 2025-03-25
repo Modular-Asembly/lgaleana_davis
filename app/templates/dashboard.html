@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Dashboard</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 2rem;
+        }
+        header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+        section.metrics {
+            display: flex;
+            justify-content: space-around;
+            margin-bottom: 2rem;
+        }
+        .metric-card {
+            background-color: #f9f9f9;
+            padding: 1rem;
+            border-radius: 8px;
+            width: 40%;
+            box-shadow: 0 0 5px rgba(0,0,0,0.1);
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 2rem;
+        }
+        table th, table td {
+            border: 1px solid #ddd;
+            padding: 0.75rem;
+            text-align: left;
+        }
+        table th {
+            background-color: #efefef;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Dashboard</h1>
+    </header>
+    <section class="metrics">
+        <div class="metric-card">
+            <h2>Shopify Total</h2>
+            <p>{{ metrics.shopify_total }}</p>
+        </div>
+        <div class="metric-card">
+            <h2>Google Ads Total</h2>
+            <p>{{ metrics.google_ads_total }}</p>
+        </div>
+    </section>
+    <section class="data-tables">
+        <h2>Shopify Data</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Shopify ID</th>
+                    <th>Title</th>
+                    <th>Price</th>
+                    <th>Created At</th>
+                    <th>Updated At</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in shopify_data %}
+                <tr>
+                    <td>{{ item.id }}</td>
+                    <td>{{ item.shopify_id }}</td>
+                    <td>{{ item.title }}</td>
+                    <td>{{ item.price }}</td>
+                    <td>{{ item.created_at }}</td>
+                    <td>{{ item.updated_at }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <h2>Google Ads Data</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Google Ads ID</th>
+                    <th>Campaign Name</th>
+                    <th>Impressions</th>
+                    <th>Clicks</th>
+                    <th>Cost</th>
+                    <th>Created At</th>
+                    <th>Updated At</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in google_ads_data %}
+                <tr>
+                    <td>{{ item.id }}</td>
+                    <td>{{ item.google_ads_id }}</td>
+                    <td>{{ item.campaign_name }}</td>
+                    <td>{{ item.impressions }}</td>
+                    <td>{{ item.clicks }}</td>
+                    <td>{{ item.cost }}</td>
+                    <td>{{ item.created_at }}</td>
+                    <td>{{ item.updated_at }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </section>
+</body>
+</html>
